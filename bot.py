@@ -1,24 +1,24 @@
 import os
 import logging
+import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, ConversationHandler
-from openai import OpenAI
 
-# ============== خواندن تنظیمات از متغیرهای محیطی ==============
+# ============== تنظیمات محیطی ==============
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 STATIC_INVITE_LINK = os.getenv("STATIC_INVITE_LINK")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not TOKEN or not OPENAI_API_KEY:
-    print("❌ خطا: متغیرهای محیطی BOT_TOKEN یا OPENAI_API_KEY تنظیم نشده‌اند!")
+if not TOKEN or not GEMINI_API_KEY:
+    print("❌ خطا: متغیرهای محیطی تنظیم نشده‌اند!")
     exit(1)
 
-# تنظیم کلاینت OpenAI (مخصوص ChatGPT)
-client = OpenAI(api_key=OPENAI_API_KEY)
+# تنظیمات Google Gemini
+genai.configure(api_key=GEMINI_API_KEY)
 
-# مراحل مکالمه
+# ========== مراحل مکالمه ==========
 ASKING = 0
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -31,9 +31,8 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     context.user_data['question_count'] = 0
     context.user_data['is_alive'] = True
-    context.user_data['history'] = []
 
-    # پرامپت سیستم برای تولید هوشمندانه سوالات (بدون ذکر نام هیچ سرویسی)
+    # پرامپت سیستم (برای شروع مکالمه)
     system_prompt = (
         "تو یک استاد بازی 'بن‌بست فکری' هستی. "
         "قراره یک مکالمه زنده و هوشمند با کاربر داشته باشی و حداکثر ۱۰ سوال چالش‌برانگیز، غیرقابل پیش‌بینی و خلاقانه بپرسی. "
@@ -44,23 +43,22 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "سبک حرف زدنت باید جذاب، هوشمندانه، کمی طنزآمیز و صمیمی باشه. "
         "اگر کاربر درخواست راهنمایی کرد، یک نکته کوچک بهش بده، اما جواب رو لو نده."
     )
-    context.user_data['history'].append({"role": "system", "content": system_prompt})
-    
-    # دریافت اولین سوال
+
+    # ایجاد مدل و شروع مکالمه
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    chat = model.start_chat(history=[])
+    context.user_data['chat'] = chat  # ذخیره‌ی جلسه مکالمه
+
     await update.message.reply_text("🧠 در حال آماده‌سازی سوالات بن‌بست فکری... یک لحظه صبر کن.")
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # مدل مکالمه‌ای ChatGPT (رایگان و سریع)
-            messages=context.user_data['history']
-        )
-        ai_reply = response.choices[0].message.content
-        context.user_data['history'].append({"role": "assistant", "content": ai_reply})
+        # ارسال پرامپت سیستم و دریافت اولین سوال
+        response = chat.send_message(system_prompt + "\n\nلطفاً سوال اول خود را بپرس.")
+        ai_reply = response.text
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در برقراری ارتباط: {e}")
         return ConversationHandler.END
-    
-    # ارسال پیام شروع + جایزه
+
     await update.message.reply_text(
         f"🎯 **به بازی ۱۰ سوال بن‌بست فکری خوش آمدی!**\n\n"
         f"🏆 **جایزه:** اگر از هر ۱۰ سوال بدون افتادن در بن‌بست عبور کنی، لینک کانال خصوصی رو بهت می‌دم.\n\n"
@@ -72,24 +70,18 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_answer = update.message.text.strip()
     context.user_data['question_count'] += 1
-    
-    # ذخیره پاسخ کاربر
-    context.user_data['history'].append({"role": "user", "content": user_answer})
-    
+    chat = context.user_data['chat']  # بازیابی جلسه مکالمه
+
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=context.user_data['history']
-        )
-        ai_reply = response.choices[0].message.content
-        context.user_data['history'].append({"role": "assistant", "content": ai_reply})
+        # ارسال پاسخ کاربر به هوش مصنوعی
+        response = chat.send_message(user_answer)
+        ai_reply = response.text
     except Exception as e:
         await update.message.reply_text(f"❌ خطا در پردازش پاسخ: {e}")
         return ASKING
 
-    # بررسی وضعیت بازی بر اساس علامت‌های هوش مصنوعی
+    # بررسی وضعیت بازی (با علامت‌های تعیین شده)
     if "[END]" in ai_reply:
-        # کاربر باخت
         await send_report_to_admin(update, context, status="باخت در سوال")
         await update.message.reply_text(
             f"❌ **باختی!** تو توی بن‌بست گیر کردی.\n"
@@ -98,9 +90,8 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data.clear()
         return ConversationHandler.END
-    
+
     elif "[WIN]" in ai_reply or context.user_data['question_count'] >= 10:
-        # کاربر برنده شد
         await send_report_to_admin(update, context, status="برنده شد (۱۰ سوال)")
         try:
             invite_link = await context.bot.create_chat_invite_link(CHANNEL_ID)
@@ -114,31 +105,31 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         context.user_data.clear()
         return ConversationHandler.END
-    
+
     else:
-        # سوال بعدی
         await update.message.reply_text(f"{ai_reply}\n\n(سوال {context.user_data['question_count']} از ۱۰)")
         return ASKING
 
 async def send_report_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, status):
     user = update.effective_user
     info = context.user_data['user_info']
-    
+    chat = context.user_data['chat']
+
+    # استخراج تاریخچه از جلسه Gemini
+    history_text = "**📝 تاریخچه مکالمه کامل:**\n"
+    for msg in chat.history:
+        role = "👤 کاربر" if msg.role == "user" else "🤖 ربات"
+        history_text += f"{role}: {msg.parts[0].text}\n"
+
     # دریافت عکس پروفایل
     photos = await context.bot.get_user_profile_photos(user.id)
     photo_file_id = photos.photos[0][-1].file_id if photos.total_count > 0 else None
-    
-    # ساخت گزارش (تاریخچه کامل مکالمه + پروفایل)
+
     report = f"📋 **گزارش جدید**\n"
     report += f"👤 @{info['username']}\n🆔 {info['id']}\n"
     report += f"🏆 وضعیت نهایی: {status}\n\n"
-    report += "**📝 تاریخچه مکالمه کامل:**\n"
-    for msg in context.user_data['history']:
-        if msg['role'] == 'user':
-            report += f"👤 کاربر: {msg['content']}\n"
-        elif msg['role'] == 'assistant':
-            report += f"🤖 ربات: {msg['content']}\n"
-    
+    report += history_text
+
     if photo_file_id:
         await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=photo_file_id, caption=report, parse_mode='Markdown')
     else:
