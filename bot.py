@@ -11,17 +11,13 @@ STATIC_INVITE_LINK = os.getenv("STATIC_INVITE_LINK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not TOKEN or not OPENAI_API_KEY:
-    print("❌ خطا: متغیرهای محیطی BOT_TOKEN یا OPENAI_API_KEY تنظیم نشده‌اند!")
+    print("❌ خطا: متغیرهای محیطی تنظیم نشده‌اند!")
     exit(1)
 
-# ========== تنظیمات هوش مصنوعی ==========
-# اگر از DeepSeek استفاده می‌کنید، این دو خط را فعال کنید:
-# client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://api.deepseek.com")
-# model = "deepseek-chat"
-
-# اگر از OpenRouter استفاده می‌کنید (پیشنهاد من، چون رایگان‌تر و بدون شماره تلفن)، این دو خط را فعال کنید:
+# ========== تنظیمات OpenRouter ==========
 client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://openrouter.ai/api/v1")
-model = "google/gemini-2.0-flash-lite-preview-02-05"  # یا "meta-llama/llama-3.3-70b-instruct"
+# مدل جدید و به‌روز
+model = "meta-llama/llama-3.3-70b-instruct"  
 
 ASKING = 0
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -109,6 +105,5 @@ if __name__ == '__main__':
         print("ربات با Webhook روشن شد!")
         application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
     else:
-        # اگر RENDER_EXTERNAL_URL تنظیم نشه، ریسک پورت باز نشدن رو داره
-        print("⚠️ هشدار: RENDER_EXTERNAL_URL تنظیم نشده! ربات با polling اجرا می‌شود.")
+        print("⚠️ هشدار: رندر تنظیم نشده!")
         application.run_polling()
