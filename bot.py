@@ -1,16 +1,15 @@
 import os
 import re
 import logging
-import threading
 import asyncio
-from flask import Flask
+from aiohttp import web
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, ConversationHandler
 from openai import OpenAI
 
 # ========== تنظیمات محیطی ==========
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_TARGET = os.getenv("ADMIN_TARGET", "7809557665")  # عدد خودت
+ADMIN_TARGET = os.getenv("ADMIN_TARGET", "7809557665")  # عدد خودتان
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 STATIC_INVITE_LINK = os.getenv("STATIC_INVITE_LINK")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -28,7 +27,7 @@ model = "meta-llama/llama-3.3-70b-instruct"
 ASKING = 0
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# تابع پاکسازی
+# تابع پاکسازی متن
 def clean_response_for_user(text):
     lines = text.split('\n')
     cleaned = []
@@ -77,7 +76,7 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_raw = response.choices[0].message.content
         context.user_data['history'].append({"role": "assistant", "content": ai_raw})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارتباط با هوش مصنوعی: {e}")
+        await update.message.reply_text(f"❌ خطا: {e}")
         return ConversationHandler.END
 
     clean_q = clean_response_for_user(ai_raw)
@@ -111,7 +110,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_report_to_admin(update, context, "برنده شد")
         try:
             link = await context.bot.create_chat_invite_link(CHANNEL_ID)
-            await update.message.reply_text(f"🎉 **تبریک!** گزینه صحیح بود!\n\n🏆 لینک کانال:\n{link.invite_link}")
+            await update.message.reply_text(f"🎉 **تبریک!**\n\n🏆 لینک کانال:\n{link.invite_link}")
         except:
             await update.message.reply_text(f"🎉 لینک کانال:\n\n{STATIC_INVITE_LINK}")
         context.user_data.clear()
@@ -150,37 +149,40 @@ async def cancel(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ========== اجرای Flask در Thread جداگانه ==========
-def run_flask():
-    app = Flask(__name__)
-    @app.route('/')
-    def home():
-        return "ربات زنده و سالم است!"
-    
-    PORT = int(os.environ.get('PORT', 10000))
-    print(f"🌐 سرور وب روی پورت {PORT} در پس‌زمینه باز شد.")
-    app.run(host='0.0.0.0', port=PORT)
+# ========== وب سرور aiohttp (برای رندر) ==========
+async def handle_health(request):
+    return web.Response(text="ربات زنده است!")
 
-# ========== اجرای اصلی ==========
+# ========== اجرای اصلی (یک حلقه واحد) ==========
 async def main():
-    application = ApplicationBuilder().token(TOKEN).build()
+    # ۱. راه‌اندازی وب‌سرور aiohttp برای باز نگه داشتن پورت ۱۰۰۰۰
+    app = web.Application()
+    app.router.add_get('/', handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    PORT = int(os.environ.get('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f"🌐 وب‌سرور روی پورت {PORT} باز شد (ربات زنده نگه داشته می‌شود).")
+
+    # ۲. راه‌اندازی ربات تلگرام
+    bot_app = ApplicationBuilder().token(TOKEN).build()
     conv = ConversationHandler(
         [CommandHandler('start', start_quiz)], 
         {ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)]}, 
         [CommandHandler('cancel', cancel)]
     )
-    application.add_handler(conv)
-    
-    print("🤖 ربات اصلی در Thread اصلی روشن شد و آماده دریافت پیام است!")
-    await application.run_polling()
+    bot_app.add_handler(conv)
+
+    # مقداردهی اولیه و شروع پولینگ به صورت هم‌زمان
+    await bot_app.initialize()
+    await bot_app.updater.start_polling()
+    print("🤖 ربات تلگرام روشن شد و منتظر پیام‌هاست!")
+
+    # ۳. حلقه را تا ابد باز نگه دار (جایگزین run_polling مسدودکننده)
+    await asyncio.Future()  # اینجا بی‌نهایت منتظر می‌ماند
 
 if __name__ == '__main__':
-    # ۱. راه‌اندازی Flask در Thread فرعی
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True  # با بسته شدن برنامه، این Thread هم بسته می‌شود
-    flask_thread.start()
-
-    # ۲. اجرای ربات در Thread اصلی (دیگر خطای asyncio نمی‌دهد)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
