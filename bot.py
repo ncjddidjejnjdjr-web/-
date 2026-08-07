@@ -1,164 +1,112 @@
 import os
 import logging
-import google.generativeai as genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, ConversationHandler
+from openai import OpenAI
 
-# ============== تنظیمات محیطی ==============
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 STATIC_INVITE_LINK = os.getenv("STATIC_INVITE_LINK")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not TOKEN or not GEMINI_API_KEY:
+if not TOKEN or not OPENAI_API_KEY:
     print("❌ خطا: متغیرهای محیطی تنظیم نشده‌اند!")
     exit(1)
 
-# تنظیمات Google Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+# ========== تنظیمات هوش مصنوعی ==========
+# اگر کلید DeepSeek دارید، خط زیر و model را فعال کنید:
+# client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://api.deepseek.com")
+# model = "deepseek-chat"
 
-# ========== مراحل مکالمه ==========
+# اگر کلید OpenRouter دارید (پیشنهاد من)، این دو خط را فعال کنید:
+client = OpenAI(api_key=OPENAI_API_KEY, base_url="https://openrouter.ai/api/v1")
+model = "google/gemini-2.0-flash-lite-preview-02-05"  # یا "meta-llama/llama-3.3-70b-instruct"
+
 ASKING = 0
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    context.user_data['user_info'] = {
-        'id': user.id,
-        'full_name': user.full_name,
-        'username': user.username or "ندارد"
-    }
+    context.user_data['user_info'] = {'id': user.id, 'full_name': user.full_name, 'username': user.username or "ندارد"}
     context.user_data['question_count'] = 0
-    context.user_data['is_alive'] = True
+    context.user_data['history'] = []
 
-    # پرامپت سیستم (برای شروع مکالمه)
-    system_prompt = (
-        "تو یک استاد بازی 'بن‌بست فکری' هستی. "
-        "قراره یک مکالمه زنده و هوشمند با کاربر داشته باشی و حداکثر ۱۰ سوال چالش‌برانگیز، غیرقابل پیش‌بینی و خلاقانه بپرسی. "
-        "سوالاتت باید کاربر رو به فکر فرو ببره، اما جواب‌ها منطقی باشن. "
-        "بعد از هر پاسخ کاربر، تو باید تشخیص بدی که پاسخش درسته یا غلط. "
-        "اگر پاسخ غلط بود، حتماً جمله‌ات رو با علامت '[END]' تمام کن. "
-        "اگر پاسخ درست بود و سوال دهم رو هم پرسیدی و جواب داد، جمله‌ات رو با علامت '[WIN]' تمام کن. "
-        "سبک حرف زدنت باید جذاب، هوشمندانه، کمی طنزآمیز و صمیمی باشه. "
-        "اگر کاربر درخواست راهنمایی کرد، یک نکته کوچک بهش بده، اما جواب رو لو نده."
-    )
-
-    # ایجاد مدل و شروع مکالمه
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    chat = model.start_chat(history=[])
-    context.user_data['chat'] = chat  # ذخیره‌ی جلسه مکالمه
-
-    await update.message.reply_text("🧠 در حال آماده‌سازی سوالات بن‌بست فکری... یک لحظه صبر کن.")
+    system_prompt = "تو یک استاد بازی 'بن‌بست فکری' هستی. حداکثر ۱۰ سوال چالش‌برانگیز بپرس. اگر پاسخ غلط بود، جمله را با '[END]' تمام کن. اگر سوال دهم درست بود، با '[WIN]' تمام کن."
+    context.user_data['history'].append({"role": "system", "content": system_prompt})
+    
+    await update.message.reply_text("🧠 در حال آماده‌سازی سوالات...")
     
     try:
-        # ارسال پرامپت سیستم و دریافت اولین سوال
-        response = chat.send_message(system_prompt + "\n\nلطفاً سوال اول خود را بپرس.")
-        ai_reply = response.text
+        response = client.chat.completions.create(model=model, messages=context.user_data['history'])
+        ai_reply = response.choices[0].message.content
+        context.user_data['history'].append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در برقراری ارتباط: {e}")
+        await update.message.reply_text(f"❌ خطا: {e}")
         return ConversationHandler.END
 
-    await update.message.reply_text(
-        f"🎯 **به بازی ۱۰ سوال بن‌بست فکری خوش آمدی!**\n\n"
-        f"🏆 **جایزه:** اگر از هر ۱۰ سوال بدون افتادن در بن‌بست عبور کنی، لینک کانال خصوصی رو بهت می‌دم.\n\n"
-        f"------------\n"
-        f"{ai_reply}"
-    )
+    await update.message.reply_text(f"🎯 به بازی خوش آمدی!\n🏆 جایزه: لینک کانال\n\n{ai_reply}")
     return ASKING
 
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_answer = update.message.text.strip()
     context.user_data['question_count'] += 1
-    chat = context.user_data['chat']  # بازیابی جلسه مکالمه
-
+    context.user_data['history'].append({"role": "user", "content": user_answer})
+    
     try:
-        # ارسال پاسخ کاربر به هوش مصنوعی
-        response = chat.send_message(user_answer)
-        ai_reply = response.text
+        response = client.chat.completions.create(model=model, messages=context.user_data['history'])
+        ai_reply = response.choices[0].message.content
+        context.user_data['history'].append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در پردازش پاسخ: {e}")
+        await update.message.reply_text(f"❌ خطا: {e}")
         return ASKING
 
-    # بررسی وضعیت بازی (با علامت‌های تعیین شده)
     if "[END]" in ai_reply:
-        await send_report_to_admin(update, context, status="باخت در سوال")
-        await update.message.reply_text(
-            f"❌ **باختی!** تو توی بن‌بست گیر کردی.\n"
-            f"🧠 {ai_reply.replace('[END]', '')}\n\n"
-            f"برای تلاش مجدد، /start رو بزن."
-        )
+        await send_report_to_admin(update, context, "باخت")
+        await update.message.reply_text(f"❌ باختی!\n{ai_reply.replace('[END]','')}\nبرای تلاش مجدد /start بزن.")
         context.user_data.clear()
         return ConversationHandler.END
-
     elif "[WIN]" in ai_reply or context.user_data['question_count'] >= 10:
-        await send_report_to_admin(update, context, status="برنده شد (۱۰ سوال)")
+        await send_report_to_admin(update, context, "برنده شد")
         try:
-            invite_link = await context.bot.create_chat_invite_link(CHANNEL_ID)
-            await update.message.reply_text(
-                f"🎉 **تبریک!** تو از هر ۱۰ بن‌بست فکری سالم بیرون اومدی!\n\n"
-                f"🏆 **جایزه تو (لینک کانال):**\n{invite_link.invite_link}"
-            )
+            link = await context.bot.create_chat_invite_link(CHANNEL_ID)
+            await update.message.reply_text(f"🎉 تبریک! جایزه:\n{link.invite_link}")
         except:
-            await update.message.reply_text(
-                f"🎉 **تبریک!** لینک کانال:\n\n{STATIC_INVITE_LINK}"
-            )
+            await update.message.reply_text(f"🎉 تبریک! لینک:\n{STATIC_INVITE_LINK}")
         context.user_data.clear()
         return ConversationHandler.END
-
     else:
-        await update.message.reply_text(f"{ai_reply}\n\n(سوال {context.user_data['question_count']} از ۱۰)")
+        await update.message.reply_text(f"{ai_reply}\n(سوال {context.user_data['question_count']})")
         return ASKING
 
-async def send_report_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, status):
+async def send_report_to_admin(update, context, status):
     user = update.effective_user
     info = context.user_data['user_info']
-    chat = context.user_data['chat']
-
-    # استخراج تاریخچه از جلسه Gemini
-    history_text = "**📝 تاریخچه مکالمه کامل:**\n"
-    for msg in chat.history:
-        role = "👤 کاربر" if msg.role == "user" else "🤖 ربات"
-        history_text += f"{role}: {msg.parts[0].text}\n"
-
-    # دریافت عکس پروفایل
+    report = f"📋 گزارش\n👤 @{info['username']}\n🆔 {info['id']}\n🏆 {status}\n\n"
+    for msg in context.user_data['history']:
+        if msg['role'] == 'user':
+            report += f"👤 کاربر: {msg['content']}\n"
+        elif msg['role'] == 'assistant':
+            report += f"🤖 ربات: {msg['content']}\n"
     photos = await context.bot.get_user_profile_photos(user.id)
-    photo_file_id = photos.photos[0][-1].file_id if photos.total_count > 0 else None
-
-    report = f"📋 **گزارش جدید**\n"
-    report += f"👤 @{info['username']}\n🆔 {info['id']}\n"
-    report += f"🏆 وضعیت نهایی: {status}\n\n"
-    report += history_text
-
-    if photo_file_id:
-        await context.bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=photo_file_id, caption=report, parse_mode='Markdown')
+    if photos.total_count > 0:
+        await context.bot.send_photo(ADMIN_CHAT_ID, photos.photos[0][-1].file_id, caption=report)
     else:
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=report + "\n⚠️ بدون پروفایل", parse_mode='Markdown')
+        await context.bot.send_message(ADMIN_CHAT_ID, report)
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ بازی لغو شد.")
+async def cancel(update, context):
+    await update.message.reply_text("❌ لغو شد.")
     context.user_data.clear()
     return ConversationHandler.END
 
-# ========== بخش اجرا ==========
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
-    
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start_quiz)],
-        states={
-            ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(conv_handler)
-
+    conv = ConversationHandler([CommandHandler('start', start_quiz)], {ASKING: [MessageHandler(filters.TEXT, handle_answer)]}, [CommandHandler('cancel', cancel)])
+    application.add_handler(conv)
     PORT = int(os.environ.get('PORT', 10000))
     WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
-
     if WEBHOOK_URL:
-        print(f"ربات هوشمند زنده روی {WEBHOOK_URL} روشن شد!")
+        print("ربات روشن شد!")
         application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
     else:
-        print("⚠️ هشدار: رندر تنظیم نشده!")
         application.run_polling()
