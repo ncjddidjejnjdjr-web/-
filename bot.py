@@ -14,9 +14,9 @@ if not TOKEN:
     exit(1)
 # ==============================================================
 
-# سوالات و جواب‌ها
+# سوالات و جواب‌ها (سوال اول به "آدم" تغییر کرد)
 QUESTIONS = [
-    {"q": "جمله را کامل کنید: من ادم ... هستم", "a": "کونی", "hint": "کلمه ۴ حرفی محاوره‌ای"},
+    {"q": "جمله را کامل کنید: من ادم ... هستم", "a": "آدم", "hint": "یک کلمه ۳ حرفی برای تعریف انسان (مخالف حیوان)"},
     {"q": "حاصل ۲ + ۲ چند است؟", "a": "4", "hint": "عدد ساده"},
     {"q": "نام پایتون از چه موجودی است؟", "a": "مار", "hint": "یک خزنده"}
 ]
@@ -31,7 +31,7 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['answers'] = []
     context.user_data['is_correct'] = True
     first_q = QUESTIONS[0]
-    await update.message.reply_text(f"🎯 به سوالات پاسخ دهید.\n\n{first_q['q']}\n\n💡 برای راهنمایی 'راهنمایی' را بفرستید.")
+    await update.message.reply_text(f"🎯 به سوالات پاسخ دهید.\n\n**{first_q['q']}**\n\n💡 برای راهنمایی 'راهنمایی' را بفرستید.")
     return ASKING
 
 async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,7 +40,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_q = QUESTIONS[current_index]
     
     if user_answer.lower() == "راهنمایی":
-        await update.message.reply_text(f"💡 راهنمایی: {current_q['hint']}\n\nحالا پاسخ را بفرستید.")
+        await update.message.reply_text(f"💡 **راهنمایی:** {current_q['hint']}\n\nحالا پاسخ را بفرستید.")
         return ASKING
     
     is_correct = user_answer.lower() == current_q['a'].lower()
@@ -51,7 +51,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     next_index = current_index + 1
     if next_index < len(QUESTIONS):
         context.user_data['current_q_index'] = next_index
-        await update.message.reply_text(f"سوال بعدی:\n\n{QUESTIONS[next_index]['q']}\n\n💡 'راهنمایی' را بفرستید.")
+        await update.message.reply_text(f"سوال بعدی:\n\n**{QUESTIONS[next_index]['q']}**\n\n💡 'راهنمایی' را بفرستید.")
         return ASKING
     else:
         await send_report_to_admin(update, context)
@@ -75,7 +75,7 @@ async def send_report_to_admin(update: Update, context: ContextTypes.DEFAULT_TYP
     photos = await context.bot.get_user_profile_photos(user.id)
     photo_file_id = photos.photos[0][-1].file_id if photos.total_count > 0 else None
     
-    report = f"📋 گزارش جدید\n👤 @{info['username']}\n🆔 {info['id']}\n📛 {info['full_name']}\n🏆 نتیجه: {overall}\n\n"
+    report = f"📋 **گزارش جدید**\n👤 @{info['username']}\n🆔 {info['id']}\n📛 {info['full_name']}\n🏆 نتیجه: {overall}\n\n"
     for i, ans in enumerate(answers, 1):
         report += f"{i}. {ans['question']}\n   پاسخ: {ans['user_answer']} {'✅' if ans['correct'] else '❌'}\n"
     
@@ -89,7 +89,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-if name == 'main':
+# ========== بخش اجرا (اصلاح شده با دو تا زیرخط) ==========
+if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start_quiz)],
@@ -99,16 +100,12 @@ if name == 'main':
     application.add_handler(conv_handler)
 
     # ========== تنظیم Webhook برای Render ==========
-    PORT = int(os.environ.get('PORT', 10000))  # Render پورت 10000 را به شما می‌دهد
-    # آدرس رندر شما به صورت https://نام-اپ-شما.onrender.com خواهد بود
-    # این آدرس را در رندر پیدا می‌کنید. بهتر است بعد از دپلوی در رندر تنظیم شود.
-    # اما برای اطمینان، ما آدرس را در متغیر محیطی RENDER_EXTERNAL_URL می‌گیریم
-    WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")  # این را رندر خودکار می‌دهد
+    PORT = int(os.environ.get('PORT', 10000))
+    WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
     if WEBHOOK_URL:
         print(f"ربات با Webhook روی {WEBHOOK_URL} روشن شد!")
         application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
     else:
         print("⚠️ هشدار: RENDER_EXTERNAL_URL تنظیم نشده! لطفاً بعد از دپلوی، یک بار این آدرس را در رندر کپی کنید.")
-        # در غیر اینصورت با پولینگ (فقط برای تست موقت) اجرا می‌شود
         application.run_polling()
