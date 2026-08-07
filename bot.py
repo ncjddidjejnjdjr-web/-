@@ -4,22 +4,19 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, ConversationHandler
 from openai import OpenAI
 
-# ============== تنظیمات محیطی ==============
+# ============== خواندن تنظیمات از متغیرهای محیطی ==============
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 STATIC_INVITE_LINK = os.getenv("STATIC_INVITE_LINK")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not TOKEN or not DEEPSEEK_API_KEY:
-    print("❌ خطا: متغیرهای محیطی BOT_TOKEN یا DEEPSEEK_API_KEY تنظیم نشده‌اند!")
+if not TOKEN or not OPENAI_API_KEY:
+    print("❌ خطا: متغیرهای محیطی BOT_TOKEN یا OPENAI_API_KEY تنظیم نشده‌اند!")
     exit(1)
 
-# تنظیم کلاینت DeepSeek (سازگار با OpenAI)
-client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"  # آدرس اصلی API دیپ‌سیک
-)
+# تنظیم کلاینت OpenAI (مخصوص ChatGPT)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # مراحل مکالمه
 ASKING = 0
@@ -36,7 +33,7 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['is_alive'] = True
     context.user_data['history'] = []
 
-    # پرامپت سیستم مخصوص DeepSeek (به زبان فارسی)
+    # پرامپت سیستم برای تولید هوشمندانه سوالات (بدون ذکر نام هیچ سرویسی)
     system_prompt = (
         "تو یک استاد بازی 'بن‌بست فکری' هستی. "
         "قراره یک مکالمه زنده و هوشمند با کاربر داشته باشی و حداکثر ۱۰ سوال چالش‌برانگیز، غیرقابل پیش‌بینی و خلاقانه بپرسی. "
@@ -49,18 +46,18 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data['history'].append({"role": "system", "content": system_prompt})
     
-    # دریافت اولین سوال از DeepSeek
-    await update.message.reply_text("🧠 در حال آماده‌سازی سوالات بن‌بست فکری با هوش دیپ‌سیک... یک لحظه صبر کن.")
+    # دریافت اولین سوال
+    await update.message.reply_text("🧠 در حال آماده‌سازی سوالات بن‌بست فکری... یک لحظه صبر کن.")
     
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",  # مدل مکالمه‌ای DeepSeek
+            model="gpt-3.5-turbo",  # مدل مکالمه‌ای ChatGPT (رایگان و سریع)
             messages=context.user_data['history']
         )
         ai_reply = response.choices[0].message.content
         context.user_data['history'].append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارتباط با هوش مصنوعی: {e}")
+        await update.message.reply_text(f"❌ خطا در برقراری ارتباط: {e}")
         return ConversationHandler.END
     
     # ارسال پیام شروع + جایزه
@@ -81,16 +78,16 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            model="gpt-3.5-turbo",
             messages=context.user_data['history']
         )
         ai_reply = response.choices[0].message.content
         context.user_data['history'].append({"role": "assistant", "content": ai_reply})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارتباط با هوش مصنوعی: {e}")
+        await update.message.reply_text(f"❌ خطا در پردازش پاسخ: {e}")
         return ASKING
 
-    # بررسی وضعیت بازی بر اساس علامت‌های DeepSeek
+    # بررسی وضعیت بازی بر اساس علامت‌های هوش مصنوعی
     if "[END]" in ai_reply:
         # کاربر باخت
         await send_report_to_admin(update, context, status="باخت در سوال")
@@ -127,10 +124,12 @@ async def send_report_to_admin(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     info = context.user_data['user_info']
     
+    # دریافت عکس پروفایل
     photos = await context.bot.get_user_profile_photos(user.id)
     photo_file_id = photos.photos[0][-1].file_id if photos.total_count > 0 else None
     
-    report = f"📋 **گزارش جدید (ربات زنده با DeepSeek)**\n"
+    # ساخت گزارش (تاریخچه کامل مکالمه + پروفایل)
+    report = f"📋 **گزارش جدید**\n"
     report += f"👤 @{info['username']}\n🆔 {info['id']}\n"
     report += f"🏆 وضعیت نهایی: {status}\n\n"
     report += "**📝 تاریخچه مکالمه کامل:**\n"
@@ -167,7 +166,7 @@ if __name__ == '__main__':
     WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
     if WEBHOOK_URL:
-        print(f"ربات هوشمند زنده با DeepSeek روی {WEBHOOK_URL} روشن شد!")
+        print(f"ربات هوشمند زنده روی {WEBHOOK_URL} روشن شد!")
         application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
     else:
         print("⚠️ هشدار: رندر تنظیم نشده!")
