@@ -1,3 +1,2 @@
 python-telegram-bot[webhooks]
-openai
 aiohttp
