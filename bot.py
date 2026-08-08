@@ -8,7 +8,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filte
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    print("❌ خطا: BOT_TOKEN تنظیم نشده است!")
+    print("❌ توکن تنظیم نشده است!")
     exit(1)
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -21,17 +21,20 @@ async def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, catch_all))
 
+    # حذف وب‌هوک قبلی به‌صورت قطعی
     await app.bot.delete_webhook(drop_pending_updates=True)
-    print("🔴 وب‌هوک پاک شد.")
+    print("🔴 وب‌هوک قبلی پاک شد.")
 
     await app.initialize()
     await app.updater.start_polling()
-    print("🤖 ربات تست (حل Conflict) روشن شد.")
+    print("🤖 ربات تست (حل Conflict) روشن شد و منتظر پیام‌هاست.")
     await asyncio.Future()
 
 async def run_web_server():
     app = web.Application()
-    app.router.add_get('/', lambda _: web.Response(text="زنده است"))
+    async def health(request):
+        return web.Response(text="ربات زنده است")
+    app.router.add_get('/', health)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get('PORT', 10000))
