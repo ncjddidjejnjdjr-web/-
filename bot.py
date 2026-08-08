@@ -76,7 +76,13 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_raw = response.choices[0].message.content
         context.user_data['history'].append({"role": "assistant", "content": ai_raw})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {e}")
+        # 🛑 اینجا اگر خطا باشد، به کاربر می‌گوییم مشکل چیست!
+        await update.message.reply_text(
+            f"❌ خطا در اتصال به هوش مصنوعی: {e}\n\n"
+            "🔧 ۱. مطمئن شوید کلید OPENAI_API_KEY در رندر صحیح باشد.\n"
+            "🔧 ۲. اگر کلید OpenRouter جدید است، ممکن است اعتبار رایگان تمام شده باشد.\n"
+            "🔧 برای تست، لطفاً یک پیام ساده مثل 'سلام' بفرستید تا ببینم پاسخ می‌دهم یا نه."
+        )
         return ConversationHandler.END
 
     clean_q = clean_response_for_user(ai_raw)
@@ -99,7 +105,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_raw = response.choices[0].message.content
         context.user_data['history'].append({"role": "assistant", "content": ai_raw})
     except Exception as e:
-        await update.message.reply_text(f"❌ خطا: {e}")
+        await update.message.reply_text(f"❌ خطا در پردازش پاسخ: {e}")
         return ASKING
 
     is_win = re.search(r'^\s*WIN:', ai_raw, re.MULTILINE)
@@ -149,13 +155,13 @@ async def cancel(update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ========== وب سرور aiohttp (برای رندر) ==========
+# ========== وب سرور aiohttp ==========
 async def handle_health(request):
     return web.Response(text="ربات زنده است!")
 
-# ========== اجرای اصلی (یک حلقه واحد) ==========
+# ========== اجرای اصلی ==========
 async def main():
-    # ۱. راه‌اندازی وب‌سرور aiohttp برای باز نگه داشتن پورت ۱۰۰۰۰
+    # ۱. راه‌اندازی aiohttp
     app = web.Application()
     app.router.add_get('/', handle_health)
     runner = web.AppRunner(app)
@@ -163,7 +169,7 @@ async def main():
     PORT = int(os.environ.get('PORT', 10000))
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-    print(f"🌐 وب‌سرور روی پورت {PORT} باز شد (ربات زنده نگه داشته می‌شود).")
+    print(f"🌐 وب‌سرور روی پورت {PORT} باز شد.")
 
     # ۲. راه‌اندازی ربات تلگرام
     bot_app = ApplicationBuilder().token(TOKEN).build()
@@ -172,15 +178,20 @@ async def main():
         {ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)]}, 
         [CommandHandler('cancel', cancel)]
     )
+    
+    # یک هندلر ساده برای "سلام" گفتن به ربات (بدون سوال)
+    async def simple_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text("سلام! ربات زنده است. برای شروع بازی /start را بزنید.")
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, simple_reply))
+
     bot_app.add_handler(conv)
 
-    # مقداردهی اولیه و شروع پولینگ به صورت هم‌زمان
     await bot_app.initialize()
     await bot_app.updater.start_polling()
     print("🤖 ربات تلگرام روشن شد و منتظر پیام‌هاست!")
 
-    # ۳. حلقه را تا ابد باز نگه دار (جایگزین run_polling مسدودکننده)
-    await asyncio.Future()  # اینجا بی‌نهایت منتظر می‌ماند
+    # ۳. حلقه را باز نگه دار
+    await asyncio.Future()
 
 if __name__ == '__main__':
     try:
