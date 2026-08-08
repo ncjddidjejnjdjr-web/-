@@ -1,45 +1,84 @@
 import os
-import threading
 import asyncio
-from flask import Flask
+import logging
+from aiohttp import web
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    print("❌ توکن تنظیم نشده است!")
+    print("❌ خطا: متغیر محیطی BOT_TOKEN تنظیم نشده است!")
     exit(1)
 
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# --------------------------------------------------
+# هندلرهای ربات
+# --------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ ربات تست سالم است! دستور /start کار می‌کند.")
+    await update.message.reply_text("✅ ربات زنده است! برای تست هر پیامی بفرستید.")
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"📩 پیام شما دریافت شد: {update.message.text}")
+    await update.message.reply_text(f"📩 شما گفتید: {update.message.text}")
 
-def run_telegram_bot():
-    # ایجاد یک حلقه رویداد جدید برای جلوگیری از خطای set_wakeup_fd
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
+# --------------------------------------------------
+# تنظیمات ربات
+# --------------------------------------------------
+async def run_bot():
+    # ساخت اپلیکیشن
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    print("🤖 ربات ساده تلگرام در حال اجرا است...")
-    app.run_polling()
+    # حذف وب‌هوک قبلی (برای جلوگیری از Conflict)
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    print("🔴 وب‌هوک قبلی پاک شد.")
 
-app = Flask(__name__)
+    # شروع پولینگ
+    await app.initialize()
+    await app.updater.start_polling()
+    print("🤖 ربات روشن شد و منتظر پیام‌هاست...")
+    
+    # اینجا برنامه را متوقف نمی‌کنیم، بلکه آن را به عنوان یک Task نگه می‌داریم
+    # تا به‌همراه سرور اجرا شود.
+    # در واقع `run_polling` به‌صورت غیرمسدودکننده کار می‌کند.
+    # ما باید یک `Future` برای جلوگیری از پایان برنامه ایجاد کنیم.
+    stop_signal = asyncio.Future()
+    await stop_signal
 
-@app.route('/')
-def home():
-    return "ربات تست زنده است!"
+# --------------------------------------------------
+# وب‌سرور aiohttp برای رندر (روی پورت ۱۰۰۰۰)
+# --------------------------------------------------
+async def handle_health(request):
+    return web.Response(text="ربات زنده است!")
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get('PORT', 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    print(f"🌐 سرور وب روی پورت {port} باز شد.")
+    # مانند ربات، این هم به یک Future نیاز دارد تا متوقف نشود
+    await asyncio.Future()
+
+# --------------------------------------------------
+# اجرای همزمان هر دو در یک حلقه
+# --------------------------------------------------
+async def main():
+    # اجرای ربات و سرور به‌صورت همزمان
+    await asyncio.gather(
+        run_bot(),
+        run_web_server()
+    )
 
 if __name__ == '__main__':
-    # اجرای ربات در یک ترد جداگانه
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-
-    # اجرای وب‌سرور (Flask) در ترد اصلی برای باز نگه داشتن پورت
-    port = int(os.environ.get('PORT', 10000))
-    print(f"🌐 وب‌سرور روی پورت {port} باز شد.")
-    app.run(host='0.0.0.0', port=port)
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("ربات متوقف شد.")
