@@ -3,9 +3,10 @@ import asyncio
 import logging
 from aiohttp import web
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CommandHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_USERNAME = "@Sefvhra"  # یوزرنیم ادمین
 
 if not TOKEN:
     print("❌ توکن تنظیم نشده است!")
@@ -13,23 +14,58 @@ if not TOKEN:
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-async def catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f"📩 پیام دریافت شد از {update.effective_user.id}: {update.message.text}")
-    await update.message.reply_text("✅ ربات تست زنده است! پیام شما دریافت شد.")
+# ========== تابع گزارش ورود کاربر به ادمین ==========
+async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    report_text = (
+        f"🚀 **کاربر جدید وارد شد!**\n"
+        f"🆔 آیدی عددی: `{user.id}`\n"
+        f"👤 نام کاربری: @{user.username or 'ندارد'}\n"
+        f"📛 نام کامل: {user.full_name}"
+    )
+    try:
+        photos = await context.bot.get_user_profile_photos(user.id)
+        if photos.total_count > 0:
+            await context.bot.send_photo(
+                chat_id=ADMIN_USERNAME,  # اینجا یوزرنیم می‌رود
+                photo=photos.photos[0][-1].file_id,
+                caption=report_text,
+                parse_mode='Markdown'
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=ADMIN_USERNAME,
+                text=report_text + "\n⚠️ بدون پروفایل",
+                parse_mode='Markdown'
+            )
+        print(f"📤 گزارش ورود کاربر {user.id} به {ADMIN_USERNAME} ارسال شد.")
+    except Exception as e:
+        print(f"⚠️ خطا در ارسال گزارش به ادمین: {e}")
 
+# ========== هندلر دستور /start ==========
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_login_report(update, context)
+    await update.message.reply_text("👋 سلام! ربات روشن است. هر پیامی بفرستید تا پاسخ دریافت کنید.")
+
+# ========== هندلر پاسخ به هر پیام ==========
+async def catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"📩 پیام شما دریافت شد: {update.message.text}")
+
+# ========== تنظیمات ربات ==========
 async def run_bot():
     app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.ALL, catch_all))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catch_all))
 
-    # حذف وب‌هوک قبلی به‌صورت قطعی
     await app.bot.delete_webhook(drop_pending_updates=True)
-    print("🔴 وب‌هوک قبلی پاک شد.")
+    print("🔴 وب‌هوک پاک شد.")
 
     await app.initialize()
     await app.updater.start_polling()
-    print("🤖 ربات تست (حل Conflict) روشن شد و منتظر پیام‌هاست.")
+    print("🤖 ربات با گزارش‌دهنده ورود روشن شد و منتظر پیام‌هاست.")
     await asyncio.Future()
 
+# ========== سرور وب برای رندر ==========
 async def run_web_server():
     app = web.Application()
     async def health(request):
@@ -43,6 +79,7 @@ async def run_web_server():
     print(f"🌐 سرور وب روی پورت {port} باز شد.")
     await asyncio.Future()
 
+# ========== اجرای همزمان ==========
 async def main():
     await asyncio.gather(run_bot(), run_web_server())
 
