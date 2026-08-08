@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from aiohttp import web
 from telegram import Update
@@ -13,6 +14,7 @@ if not TOKEN:
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# ================== گزارش ورود به ادمین ==================
 async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     report_text = (
@@ -40,6 +42,7 @@ async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"⚠️ خطا در ارسال گزارش به ادمین: {e}")
 
+# ================== هندلرها ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_login_report(update, context)
     await update.message.reply_text("👋 سلام! ربات روشن است. هر پیامی بفرستید تا پاسخ دریافت کنید.")
@@ -47,26 +50,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📩 پیام شما دریافت شد: {update.message.text}")
 
+# ================== تنظیم و اجرای ربات (Polling + aiohttp) ==================
 async def main():
+    # ۱. ساخت اپلیکیشن ربات
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catch_all))
 
+    # ۲. حذف وب‌هوک قبلی (برای جلوگیری از Conflict)
+    await application.bot.delete_webhook(drop_pending_updates=True)
+    print("🔴 وب‌هوک قبلی پاک شد.")
+
+    # ۳. شروع Polling
+    await application.initialize()
+    await application.updater.start_polling()
+    print("🤖 ربات در حال دریافت پیام‌هاست (Polling).")
+
+    # ۴. راه‌اندازی سرور aiohttp برای باز نگه داشتن پورت ۱۰۰۰۰
     PORT = int(os.environ.get('PORT', 10000))
-    WEBHOOK_URL = os.getenv("RAILWAY_PUBLIC_DOMAIN")  # ریلوی خودکار این آدرس را می‌دهد
+    app = web.Application()
+    async def health(request):
+        return web.Response(text="ربات زنده است")
+    app.router.add_get('/', health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    print(f"🌐 سرور وب روی پورت {PORT} باز شد (ربات را زنده نگه می‌دارد).")
 
-    if not WEBHOOK_URL:
-        print("⚠️ متغیر RAILWAY_PUBLIC_DOMAIN تنظیم نشده! با Webhook کار نمی‌کند.")
-        return
-
-    print(f"🌐 در حال تنظیم Webhook روی https://{WEBHOOK_URL}...")
-    await application.bot.set_webhook(url=f"https://{WEBHOOK_URL}")
-    print("✅ Webhook تنظیم شد! ربات منتظر پیام‌هاست.")
-    
-    await application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=f"https://{WEBHOOK_URL}")
+    # ۵. اینجا برنامه را باز نگه می‌داریم تا متوقف نشود
+    await asyncio.Future()
 
 if __name__ == '__main__':
-    import asyncio
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
