@@ -1,10 +1,8 @@
 import os
-import threading
-import asyncio
 import logging
-from flask import Flask
+from aiohttp import web
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USERNAME = "@Sefvhra"
@@ -15,7 +13,7 @@ if not TOKEN:
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ================== هندلرهای ربات ==================
+# ========== تابع گزارش ورود کاربر (فقط برای @Sefvhra) ==========
 async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     report_text = (
@@ -43,44 +41,33 @@ async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"⚠️ خطا در ارسال گزارش به ادمین: {e}")
 
+# ========== هندلرها ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_login_report(update, context)
-    await update.message.reply_text("👋 سلام! ربات روشن است. هر پیامی بفرستید تا پاسخ دریافت کنید.")
+    await update.message.reply_text("👋 سلام! ربات با Webhook روشن شد. هر پیامی بفرستید تا پاسخ دریافت کنید.")
 
 async def catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"📩 پیام شما دریافت شد: {update.message.text}")
 
-# ================== راه‌اندازی ربات در یک Thread جداگانه ==================
-def run_bot():
-    # یک حلقه رویداد جدید برای این Thread ایجاد می‌کنیم
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+# ========== تنظیم و اجرای ربات با Webhook ==========
+async def main():
+    application = ApplicationBuilder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catch_all))
 
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, catch_all))
+    PORT = int(os.environ.get('PORT', 10000))
+    WEBHOOK_URL = "https://gard-9r3g.onrender.com"
 
-    # حذف وب‌هوک قبلی (برای جلوگیری از Conflict)
-    loop.run_until_complete(app.bot.delete_webhook(drop_pending_updates=True))
-    print("🔴 وب‌هوک پاک شد.")
+    print(f"🌐 در حال تنظیم Webhook روی {WEBHOOK_URL}...")
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+    print("✅ Webhook تنظیم شد! ربات منتظر پیام‌هاست.")
 
-    print("🤖 ربات روشن شد و منتظر پیام‌هاست.")
-    app.run_polling()  # این در همان حلقه اجرا می‌شود
+    # اجرای وب‌سرور با aiohttp (جایگزین Flask) روی پورت 10000
+    await application.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
 
-# ================== سرور Flask برای رندر ==================
-app = Flask(__name__)
-
-@app.route('/')
-def health():
-    return "ربات زنده است!"
-
-# ================== اجرای اصلی ==================
 if __name__ == '__main__':
-    # اجرای ربات در یک Thread جداگانه
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-
-    # اجرای سرور Flask در Thread اصلی
-    port = int(os.environ.get('PORT', 10000))
-    print(f"🌐 سرور وب روی پورت {port} باز شد.")
-    app.run(host='0.0.0.0', port=port)
+    import asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("ربات متوقف شد.")
