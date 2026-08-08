@@ -6,7 +6,6 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CommandHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_USERNAME = "@Sefvhra"
 
 if not TOKEN:
     print("❌ توکن تنظیم نشده است!")
@@ -14,42 +13,15 @@ if not TOKEN:
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ========== تابع گزارش ورود کاربر به ادمین ==========
-async def send_login_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    report_text = (
-        f"🚀 **کاربر جدید وارد شد!**\n"
-        f"🆔 آیدی عددی: `{user.id}`\n"
-        f"👤 نام کاربری: @{user.username or 'ندارد'}\n"
-        f"📛 نام کامل: {user.full_name}"
-    )
-    try:
-        photos = await context.bot.get_user_profile_photos(user.id)
-        if photos.total_count > 0:
-            await context.bot.send_photo(
-                chat_id=ADMIN_USERNAME,
-                photo=photos.photos[0][-1].file_id,
-                caption=report_text,
-                parse_mode='Markdown'
-            )
-        else:
-            await context.bot.send_message(
-                chat_id=ADMIN_USERNAME,
-                text=report_text + "\n⚠️ بدون پروفایل",
-                parse_mode='Markdown'
-            )
-        print(f"📤 گزارش ورود کاربر {user.id} به {ADMIN_USERNAME} ارسال شد.")
-    except Exception as e:
-        print(f"⚠️ خطا در ارسال گزارش به ادمین: {e}")
-
 # ========== هندلر دستور /start ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_login_report(update, context)
-    await update.message.reply_text("👋 سلام! ربات روشن است. هر پیامی بفرستید تا پاسخ دریافت کنید.")
+    print(f"📢 [لاگ رندر] دستور /start دریافت شد از کاربر {update.effective_user.id}")
+    await update.message.reply_text("👋 سلام! ربات تست زنده است. این پیام در لاگ ثبت شد.")
 
 # ========== هندلر پاسخ به هر پیام ==========
 async def catch_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"📩 پیام شما دریافت شد: {update.message.text}")
+    print(f"📢 [لاگ رندر] پیام دریافت شد: '{update.message.text}' از کاربر {update.effective_user.id}")
+    await update.message.reply_text(f"📩 دریافت شد: '{update.message.text}'")
 
 # ========== تنظیمات ربات ==========
 async def run_bot():
@@ -62,7 +34,7 @@ async def run_bot():
 
     await app.initialize()
     await app.updater.start_polling()
-    print("🤖 ربات با گزارش‌دهنده ورود روشن شد و منتظر پیام‌هاست.")
+    print("🤖 ربات روشن شد و منتظر پیام‌هاست.")
     await asyncio.Future()
 
 # ========== سرور وب برای رندر ==========
